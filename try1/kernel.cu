@@ -39,7 +39,7 @@ bool checkEquality(int*, int*, int, int);
 
 void showMatrix(int* mat, int sizeOfM, int sizeOfN) {
 	for (int i = 0; i < sizeOfN / 4; i++) {
-		for (int j = 0; j < sizeOfM /8; j++) {
+		for (int j = 0; j < sizeOfM / 8; j++) {
 			cout << mat[(sizeOfM / 2) * i + j] << " ";
 		}
 		cout << endl;
@@ -69,7 +69,7 @@ void cpuMatrix(int* inMatrix, int* outMatrix, int sizeOfM, int sizeOfN) {
 				int a = (j + 1) % 2 == 0 ? 1 : 0;
 				if (h > 0) {
 
-					a += (h/4) * 2;
+					a += (h / 4) * 2;
 					tmp = orfer[counter] + h;
 				}
 				//cout << "INndexOUT " << (counter / 2) * sizeOfM / 2 + a + i * 2 * sizeOfM / 2 << " INDEXIN " << i * sizeOfM + tmp << endl;
@@ -84,6 +84,55 @@ void cpuMatrix(int* inMatrix, int* outMatrix, int sizeOfM, int sizeOfN) {
 }
 
 
+
+
+
+__global__ void cudaSharedKernel(int* src, int* dst)
+{
+	/*const int offsetX = BLOCK_X * blockIdx.x*THREAD_ELEMENT_X + threadIdx.x;
+	const int offsetY = BLOCK_Y * blockIdx.y*THREAD_ELEMENT_Y + threadIdx.y;*/
+
+	const int offsetX = 4 * blockIdx.x + threadIdx.x;
+	const int offsetY = threadIdx.y;
+
+	__shared__ int smemIn[512 * 4];
+	__shared__ int smemOut[512 * 4];
+
+	//int row = BLOCK_X*THREAD_ELEMENT_X;
+	int row = 4;
+	/*int a = init[offsetY * SIZE_M + offsetX + 0];
+	int b = init[offsetY * SIZE_M + offsetX + 1];
+	int c = init[offsetY * SIZE_M + offsetX + 2];
+	int d = init[offsetY * SIZE_M + offsetX + 3];*/
+
+	smemIn[threadIdx.y * row + threadIdx.x + 0] = src[offsetY * SIZE_M + offsetX + 0];
+	smemIn[threadIdx.y * row + threadIdx.x + 1] = src[offsetY * SIZE_M + offsetX + 1];
+	smemIn[threadIdx.y * row + threadIdx.x + 2] = src[offsetY * SIZE_M + offsetX + 2];
+	smemIn[threadIdx.y * row + threadIdx.x + 3] = src[offsetY * SIZE_M + offsetX + 3];
+
+	__syncthreads();
+
+	int a = smemIn[threadIdx.y * row + threadIdx.x + 0];
+	int b = smemIn[threadIdx.y * row + threadIdx.x + 1];
+	int c = smemIn[threadIdx.y * row + threadIdx.x + 2];
+	int d = smemIn[threadIdx.y * row + threadIdx.x + 3];
+
+	smemOut[threadIdx.y * row + threadIdx.x  + 0] = a;
+	smemOut[threadIdx.y * row + threadIdx.x  + 1] = b;
+	smemOut[threadIdx.y * row + threadIdx.x  + 2] = c;
+	smemOut[threadIdx.y * row + threadIdx.x  + 3] = d;
+
+	const int offsetOutX = 2 * blockIdx.x + threadIdx.x;
+	const int offsetOutY = 2 * threadIdx.y;
+
+	__syncthreads();
+
+	dst[offsetOutY * SIZE_M / 2 + offsetOutX + 0] = smemOut[threadIdx.y * row + threadIdx.x + 1];
+	dst[offsetOutY * SIZE_M / 2 + offsetOutX + 1] = smemOut[threadIdx.y * row + threadIdx.x + 2];
+	dst[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 1] = smemOut[threadIdx.y * row + threadIdx.x + 3];
+	dst[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 0] = smemOut[threadIdx.y * row + threadIdx.x + 0];
+}
+
 __global__ void cudaKernel(int *init, int* dest) {
 	//const int offsetX = BLOCK_X * blockIdx.x  + threadIdx.x;
 	const int offsetX = 4 * blockIdx.x + threadIdx.x;
@@ -95,15 +144,15 @@ __global__ void cudaKernel(int *init, int* dest) {
 	int c = init[offsetY * SIZE_M + offsetX + 2];
 	int d = init[offsetY * SIZE_M + offsetX + 3];
 
-	
+
 	const int offsetOutX = 2 * blockIdx.x + threadIdx.x;
 	const int offsetOutY = 2 * threadIdx.y;
 
-	dest[offsetOutY * SIZE_M/2 + offsetOutX + 0] = b;
-	dest[offsetOutY * SIZE_M/2  + offsetOutX + 1] = c;
-	dest[offsetOutY * SIZE_M/2  + SIZE_M /2 + offsetOutX + 1] = d;
-	dest[offsetOutY * SIZE_M/2  + SIZE_M /2 + offsetOutX + 0] = a;
-	
+	dest[offsetOutY * SIZE_M / 2 + offsetOutX + 0] = b;
+	dest[offsetOutY * SIZE_M / 2 + offsetOutX + 1] = c;
+	dest[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 1] = d;
+	dest[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 0] = a;
+
 }
 
 void showPartOfMatrix(int *matrix) {
@@ -114,6 +163,57 @@ void showPartOfMatrix(int *matrix) {
 		cout << endl;
 	}
 }
+
+
+void cudaSharedMatrix(int *init, int *dest) {
+	float resultTime;
+
+	int* deviceInMatrix;
+	int* deviceOutMatrix;
+	//события для замера времени в CUDA
+
+	cudaEvent_t cuda_startTime;
+	cudaEvent_t cuda_endTime;
+	//Создание событий
+	cudaEventCreate(&cuda_startTime);
+	cudaEventCreate(&cuda_endTime);
+
+	cudaMalloc(&deviceInMatrix, (SIZE_M * SIZE_N * sizeof(int)));
+	cudaMalloc(&deviceOutMatrix, (SIZE_N * SIZE_M * sizeof(int)));
+	cudaMemcpy(deviceInMatrix, init, SIZE_M * SIZE_N * sizeof(int), cudaMemcpyHostToDevice);
+
+	dim3 dimGrid(16, 1);
+	dim3 dimBlock(1, 512);
+
+	//? вопросов много
+	/*int row_len = GRID_X * BLOCK_X * THREAD_ELEMENT_X;*/
+	cudaEventRecord(cuda_startTime, 0);
+
+
+	cudaSharedKernel << <dimGrid, dimBlock >> > (deviceInMatrix, deviceOutMatrix);
+
+
+
+	cudaPeekAtLastError();
+	cudaDeviceSynchronize();
+	cudaEventRecord(cuda_endTime, 0);
+	cudaEventSynchronize(cuda_endTime);
+
+	float elapsedTime;
+	cudaEventElapsedTime(&elapsedTime, cuda_startTime, cuda_endTime);
+
+	cudaEventDestroy(cuda_startTime);
+	cudaEventDestroy(cuda_endTime);
+
+	printf("The time for cuda with shared memory spend: %.3f ms\n", elapsedTime);
+
+	cudaMemcpy(init, deviceInMatrix, SIZE_N*SIZE_M * sizeof(int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(dest, deviceOutMatrix, SIZE_N*SIZE_M * sizeof(int), cudaMemcpyDeviceToHost);
+
+	cudaFree(deviceInMatrix);
+	cudaFree(deviceOutMatrix);
+}
+
 
 void cudaMatrix(int *init, int *dest) {
 	float resultTime;
@@ -139,10 +239,7 @@ void cudaMatrix(int *init, int *dest) {
 	/*int row_len = GRID_X * BLOCK_X * THREAD_ELEMENT_X;*/
 	cudaEventRecord(cuda_startTime, 0);
 
-
 	cudaKernel << <dimGrid, dimBlock >> > (deviceInMatrix, deviceOutMatrix);
-
-
 
 	cudaPeekAtLastError();
 	cudaDeviceSynchronize();
@@ -172,25 +269,20 @@ int main() {
 	int* cuda_outMatrixSharedMemory = (int*)malloc(SIZE_M * SIZE_N * sizeof(int));
 
 	fillMatrix(initMatrix, SIZE_M, SIZE_N);
-	//showMatrix(initMatrix, SIZE_M , SIZE_N);
-	/*cuda_matrixOperation(initMatrix, cuda_outMatrix, false);
-	cuda_matrixOperation(initMatrix, cuda_outMatrixSharedMemory, true);*/
-
-	/*cpu_matrixOperation(initMatrix, cpu_outMatrix, SIZE_M, SIZE_N);*/
-
-
 
 	cpuMatrix(initMatrix, cpu_outMatrix, SIZE_M, SIZE_N);
 	//showPartOfMatrix(cpu_outMatrix);
-	showMatrix(cpu_outMatrix, SIZE_M, SIZE_N);
+	//showMatrix(cpu_outMatrix, SIZE_M, SIZE_N);
 
 	cudaMatrix(initMatrix, cuda_outMatrix);
 	//showPartOfMatrix(cuda_outMatrix);
 
-	showMatrix(cuda_outMatrix, SIZE_M, SIZE_N);
+	//showMatrix(cuda_outMatrix, SIZE_M, SIZE_N);
+	cudaSharedMatrix(initMatrix, cuda_outMatrixSharedMemory);
+	//showMatrix(cuda_outMatrixSharedMemory, SIZE_M, SIZE_N);
 
 	//showMatrix(cpu_outMatrix, SIZE_M/2 , SIZE_N * 2);
-	if (checkEquality(cuda_outMatrix, cpu_outMatrix, SIZE_M, SIZE_N)) {
+	if (checkEquality(cuda_outMatrixSharedMemory, cuda_outMatrix, SIZE_M, SIZE_N) && checkEquality(cuda_outMatrix, cpu_outMatrix, SIZE_M, SIZE_N)) {
 		cout << "Results are equals!" << endl;
 	}
 	else {
@@ -203,60 +295,6 @@ int main() {
 	free(cuda_outMatrix);
 	free(cuda_outMatrixSharedMemory);
 }
-
-
-//global - ключевое слово, предназначено для указания како
-//ядро - функция, которая описывает последовательность операций , которые выполнятся на каждой нити параллельно
-//__global__ void cuda_matrixSharedMemoryOperationKernel(int* inMatrix, int* outMatrix, int numOfBlocksInRow) {
-//	int remainderElements = SIZE_M % COUNT_OF_THREADS;
-//
-//	__shared__ int sharedMemory[COUNT_OF_THREADS];
-//	__shared__ short sharedMemoryOut[COUNT_OF_THREADS * 2];
-//
-//	if (remainderElements != 0 && (blockIdx.x + 1) % numOfBlocksInRow == 0 && threadIdx.x >= remainderElements) {
-//		return;
-//	}
-//
-//	int *startOfResultRow = &inMatrix[SIZE_M * (blockIdx.x / numOfBlocksInRow)];
-//	outMatrix = &outMatrix[SIZE_M * (blockIdx.x / numOfBlocksInRow)];
-//
-//	int countOfThreads = 0;
-//
-//	if (remainderElements != 0 && (blockIdx.x + 1) % numOfBlocksInRow == 0) {
-//		countOfThreads = remainderElements;
-//	}
-//	else {
-//		countOfThreads = COUNT_OF_THREADS;
-//	}
-//
-//	if (threadIdx.x < (countOfThreads / 2)) {
-//		sharedMemory[threadIdx.x] = startOfResultRow[(blockIdx.x % numOfBlocksInRow) * COUNT_OF_THREADS / 2 + threadIdx.x];
-//	}
-//	else {
-//		sharedMemory[threadIdx.x] = startOfResultRow[threadIdx.x % (countOfThreads / 2) + SIZE_M / 2 + (blockIdx.x % numOfBlocksInRow) * COUNT_OF_THREADS / 2];
-//	}
-//
-//	int elements = sharedMemory[threadIdx.x];
-//	short firstElement = (short)elements;
-//	short secondElement = (short)(elements >> 16);
-//
-//	int offset = COUNT_OF_THREADS * 2 * (blockIdx.x % numOfBlocksInRow);
-//
-//	if (threadIdx.x < (countOfThreads / 2)) {
-//		sharedMemoryOut[threadIdx.x * 2 * 2] = firstElement;
-//		sharedMemoryOut[(threadIdx.x * 2 + 1) * 2] = secondElement;
-//	}
-//	else {
-//		sharedMemoryOut[(threadIdx.x - countOfThreads / 2) * 2 * 2 + 1] = firstElement;
-//		sharedMemoryOut[((threadIdx.x - countOfThreads / 2) * 2 + 1) * 2 + 1] = secondElement;
-//	}
-//
-//	__syncthreads();
-//
-//	outMatrix[offset / 2 + threadIdx.x] = ((int*)sharedMemoryOut)[threadIdx.x];
-//}
-
-
 
 void cpu_matrixOperation(short* inMatrix, short* outMatrix, int sizeOfM, int sizeOfN) {
 	clock_t startTime, endTime;
@@ -271,7 +309,6 @@ void cpu_matrixOperation(short* inMatrix, short* outMatrix, int sizeOfM, int siz
 	endTime = clock();
 	printf("CPU time: %lf seconds\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
 }
-
 
 
 void fillMatrix(int* matrix, int sizeM, int sizeN)
