@@ -12,49 +12,25 @@
 
 #pragma comment(lib, "cudart") 
 
-//#define SIZE_M 8
-//#define SIZE_N 4
-//#define COUNT_OF_THREADS 1024
-//#define MAX_BLOCKS 200000
-
 #define SIZE_M 64
 #define SIZE_N 512
-#define GRID_X 16
-#define GRID_Y 1
-#define BLOCK_X 32
-#define BLOCK_Y 32
-#define THREAD_ELEMENT_X 1
-#define THREAD_ELEMENT_Y 4
-
-
-
 
 using namespace std;
 
-//void cpu_matrixOperation(short*, short*, int, int);
-//void cuda_matrixOperation(short*, short*, bool);
-//void cuda_checkStatus(cudaError_t);
 void fillMatrix(int*, int, int);
-bool checkEquality(int*, int*, int, int);
+bool compareMatricies(int*, int*, int, int);
 
 void showMatrix(int* mat, int sizeOfM, int sizeOfN) {
-	for (int i = 0; i < sizeOfN / 4; i++) {
-		for (int j = 0; j < sizeOfM / 8; j++) {
+	for (int i = 0; i < sizeOfN / 64; i++) {
+		for (int j = 0; j < sizeOfM / 16; j++) {
 			cout << mat[(sizeOfM / 2) * i + j] << " ";
 		}
 		cout << endl;
 	}
-	/*for (int i = 0; i < size; i++) {
-
-		cout << mat[i] << endl;
-	}*/
 }
 
 void cpuMatrix(int* inMatrix, int* outMatrix, int sizeOfM, int sizeOfN) {
-	/*clock_t startTime, endTime;
-	startTime = clock();*/
 	int orfer[] = { 1, 2 , 0 ,3 };
-	//sizeOfM >> sizeOfN
 	LARGE_INTEGER frequency, start, finish;
 	float delay;
 	QueryPerformanceFrequency(&frequency);
@@ -72,9 +48,7 @@ void cpuMatrix(int* inMatrix, int* outMatrix, int sizeOfM, int sizeOfN) {
 					a += (h / 4) * 2;
 					tmp = orfer[counter] + h;
 				}
-				//cout << "INndexOUT " << (counter / 2) * sizeOfM / 2 + a + i * 2 * sizeOfM / 2 << " INDEXIN " << i * sizeOfM + tmp << endl;
 				outMatrix[(counter / 2) * sizeOfM / 2 + a + i * 2 * sizeOfM / 2] = inMatrix[i * sizeOfM + tmp];
-				//cout << outMatrix[(counter / 2) * sizeOfM / 2 + a + i * 2 * sizeOfM / 2] << " " << inMatrix[i * sizeOfM + tmp] << endl;
 			}
 		}
 	}
@@ -84,13 +58,8 @@ void cpuMatrix(int* inMatrix, int* outMatrix, int sizeOfM, int sizeOfN) {
 }
 
 
-
-
-
 __global__ void cudaSharedKernel(int* src, int* dst)
 {
-	/*const int offsetX = BLOCK_X * blockIdx.x*THREAD_ELEMENT_X + threadIdx.x;
-	const int offsetY = BLOCK_Y * blockIdx.y*THREAD_ELEMENT_Y + threadIdx.y;*/
 
 	const int offsetX = 4 * blockIdx.x + threadIdx.x;
 	const int offsetY = threadIdx.y;
@@ -98,72 +67,51 @@ __global__ void cudaSharedKernel(int* src, int* dst)
 	__shared__ int smemIn[512 * 4];
 	__shared__ int smemOut[512 * 4];
 
-	//int row = BLOCK_X*THREAD_ELEMENT_X;
-	int row = 4;
-	/*int a = init[offsetY * SIZE_M + offsetX + 0];
-	int b = init[offsetY * SIZE_M + offsetX + 1];
-	int c = init[offsetY * SIZE_M + offsetX + 2];
-	int d = init[offsetY * SIZE_M + offsetX + 3];*/
-
-	smemIn[threadIdx.y * row + threadIdx.x + 0] = src[offsetY * SIZE_M + offsetX + 0];
-	smemIn[threadIdx.y * row + threadIdx.x + 1] = src[offsetY * SIZE_M + offsetX + 1];
-	smemIn[threadIdx.y * row + threadIdx.x + 2] = src[offsetY * SIZE_M + offsetX + 2];
-	smemIn[threadIdx.y * row + threadIdx.x + 3] = src[offsetY * SIZE_M + offsetX + 3];
+	smemIn[threadIdx.y * 4 + threadIdx.x + 0] = src[offsetY * SIZE_M + offsetX + 0];
+	smemIn[threadIdx.y * 4 + threadIdx.x + 1] = src[offsetY * SIZE_M + offsetX + 1];
+	smemIn[threadIdx.y * 4 + threadIdx.x + 2] = src[offsetY * SIZE_M + offsetX + 2];
+	smemIn[threadIdx.y * 4 + threadIdx.x + 3] = src[offsetY * SIZE_M + offsetX + 3];
 
 	__syncthreads();
 
-	int a = smemIn[threadIdx.y * row + threadIdx.x + 0];
-	int b = smemIn[threadIdx.y * row + threadIdx.x + 1];
-	int c = smemIn[threadIdx.y * row + threadIdx.x + 2];
-	int d = smemIn[threadIdx.y * row + threadIdx.x + 3];
+	int a = smemIn[threadIdx.y * 4 + threadIdx.x + 0];
+	int b = smemIn[threadIdx.y * 4 + threadIdx.x + 1];
+	int c = smemIn[threadIdx.y * 4 + threadIdx.x + 2];
+	int d = smemIn[threadIdx.y * 4 + threadIdx.x + 3];
 
-	smemOut[threadIdx.y * row + threadIdx.x  + 0] = a;
-	smemOut[threadIdx.y * row + threadIdx.x  + 1] = b;
-	smemOut[threadIdx.y * row + threadIdx.x  + 2] = c;
-	smemOut[threadIdx.y * row + threadIdx.x  + 3] = d;
+	smemOut[threadIdx.y * 4 + threadIdx.x + 0] = a;
+	smemOut[threadIdx.y * 4 + threadIdx.x + 1] = b;
+	smemOut[threadIdx.y * 4 + threadIdx.x + 2] = c;
+	smemOut[threadIdx.y * 4 + threadIdx.x + 3] = d;
 
 	const int offsetOutX = 2 * blockIdx.x + threadIdx.x;
 	const int offsetOutY = 2 * threadIdx.y;
 
 	__syncthreads();
 
-	dst[offsetOutY * SIZE_M / 2 + offsetOutX + 0] = smemOut[threadIdx.y * row + threadIdx.x + 1];
-	dst[offsetOutY * SIZE_M / 2 + offsetOutX + 1] = smemOut[threadIdx.y * row + threadIdx.x + 2];
-	dst[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 1] = smemOut[threadIdx.y * row + threadIdx.x + 3];
-	dst[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 0] = smemOut[threadIdx.y * row + threadIdx.x + 0];
+	dst[offsetOutY * SIZE_M / 2 + offsetOutX + 0] = smemOut[threadIdx.y * 4 + threadIdx.x + 1];
+	dst[offsetOutY * SIZE_M / 2 + offsetOutX + 1] = smemOut[threadIdx.y * 4 + threadIdx.x + 2];
+	dst[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 1] = smemOut[threadIdx.y * 4 + threadIdx.x + 3];
+	dst[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 0] = smemOut[threadIdx.y * 4 + threadIdx.x + 0];
 }
 
 __global__ void cudaKernel(int *init, int* dest) {
-	//const int offsetX = BLOCK_X * blockIdx.x  + threadIdx.x;
-	const int offsetX = 4 * blockIdx.x + threadIdx.x;
-	const int offsetY = threadIdx.y;
-	//const int offsetY = BLOCK_Y * blockIdx.y * THREAD_ELEMENT_Y + threadIdx.y;
+	int offsetX = 4 * blockIdx.x + threadIdx.x;
+	int offsetY = threadIdx.y;
 
 	int a = init[offsetY * SIZE_M + offsetX + 0];
 	int b = init[offsetY * SIZE_M + offsetX + 1];
 	int c = init[offsetY * SIZE_M + offsetX + 2];
 	int d = init[offsetY * SIZE_M + offsetX + 3];
 
-
-	const int offsetOutX = 2 * blockIdx.x + threadIdx.x;
-	const int offsetOutY = 2 * threadIdx.y;
+	int offsetOutX = 2 * blockIdx.x + threadIdx.x;
+	int offsetOutY = 2 * threadIdx.y;
 
 	dest[offsetOutY * SIZE_M / 2 + offsetOutX + 0] = b;
 	dest[offsetOutY * SIZE_M / 2 + offsetOutX + 1] = c;
 	dest[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 1] = d;
 	dest[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 0] = a;
-
 }
-
-void showPartOfMatrix(int *matrix) {
-	for (int i = 0; i < SIZE_N / 4; i++) {
-		for (int j = 0; j < SIZE_M / 4; j++) {
-			cout << matrix[i * SIZE_M + j] << " ";
-		}
-		cout << endl;
-	}
-}
-
 
 void cudaSharedMatrix(int *init, int *dest) {
 	float resultTime;
@@ -184,15 +132,8 @@ void cudaSharedMatrix(int *init, int *dest) {
 
 	dim3 dimGrid(16, 1);
 	dim3 dimBlock(1, 512);
-
-	//? вопросов много
-	/*int row_len = GRID_X * BLOCK_X * THREAD_ELEMENT_X;*/
 	cudaEventRecord(cuda_startTime, 0);
-
-
 	cudaSharedKernel << <dimGrid, dimBlock >> > (deviceInMatrix, deviceOutMatrix);
-
-
 
 	cudaPeekAtLastError();
 	cudaDeviceSynchronize();
@@ -235,8 +176,6 @@ void cudaMatrix(int *init, int *dest) {
 	dim3 dimGrid(16, 1);
 	dim3 dimBlock(1, 512);
 
-	//? вопросов много
-	/*int row_len = GRID_X * BLOCK_X * THREAD_ELEMENT_X;*/
 	cudaEventRecord(cuda_startTime, 0);
 
 	cudaKernel << <dimGrid, dimBlock >> > (deviceInMatrix, deviceOutMatrix);
@@ -272,17 +211,17 @@ int main() {
 
 	cpuMatrix(initMatrix, cpu_outMatrix, SIZE_M, SIZE_N);
 	//showPartOfMatrix(cpu_outMatrix);
-	//showMatrix(cpu_outMatrix, SIZE_M, SIZE_N);
+	showMatrix(cpu_outMatrix, SIZE_M, SIZE_N);
 
 	cudaMatrix(initMatrix, cuda_outMatrix);
 	//showPartOfMatrix(cuda_outMatrix);
 
-	//showMatrix(cuda_outMatrix, SIZE_M, SIZE_N);
+	showMatrix(cuda_outMatrix, SIZE_M, SIZE_N);
 	cudaSharedMatrix(initMatrix, cuda_outMatrixSharedMemory);
-	//showMatrix(cuda_outMatrixSharedMemory, SIZE_M, SIZE_N);
+	showMatrix(cuda_outMatrixSharedMemory, SIZE_M, SIZE_N);
 
 	//showMatrix(cpu_outMatrix, SIZE_M/2 , SIZE_N * 2);
-	if (checkEquality(cuda_outMatrixSharedMemory, cuda_outMatrix, SIZE_M, SIZE_N) && checkEquality(cuda_outMatrix, cpu_outMatrix, SIZE_M, SIZE_N)) {
+	if (compareMatricies(cuda_outMatrixSharedMemory, cuda_outMatrix, SIZE_M, SIZE_N) && compareMatricies(cuda_outMatrix, cpu_outMatrix, SIZE_M, SIZE_N)) {
 		cout << "Results are equals!" << endl;
 	}
 	else {
@@ -323,15 +262,7 @@ void fillMatrix(int* matrix, int sizeM, int sizeN)
 	}
 }
 
-//void cuda_checkStatus(cudaError_t cudaStatus) {
-//	if (cudaStatus != cudaSuccess) {
-//		cout << "CUDA return error code: " << cudaStatus;
-//		cout << " " << cudaGetErrorString(cudaStatus) << endl;
-//		exit(-1);
-//	}
-//}
-
-bool checkEquality(int* inMatrix, int* outMatrix, int sizeOfM, int sizeOfN) {
+bool compareMatricies(int* inMatrix, int* outMatrix, int sizeOfM, int sizeOfN) {
 	for (int i = 0; i < sizeOfN * sizeOfM; i++) {
 		if (inMatrix[i] != outMatrix[i]) {
 			return false;
