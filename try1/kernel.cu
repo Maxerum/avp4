@@ -12,8 +12,8 @@
 
 #pragma comment(lib, "cudart") 
 
-#define SIZE_M 64
-#define SIZE_N 512
+#define SIZE_M 128
+#define SIZE_N 1024
 
 using namespace std;
 
@@ -64,8 +64,8 @@ __global__ void cudaSharedKernel(int* src, int* dst)
 	const int offsetX = 4 * blockIdx.x + threadIdx.x;
 	const int offsetY = threadIdx.y;
 
-	__shared__ int smemIn[512 * 4];
-	__shared__ int smemOut[512 * 4];
+	__shared__ int smemIn[1024 * 4];
+	__shared__ int smemOut[1024 * 4];
 
 	smemIn[threadIdx.y * 4 + threadIdx.x + 0] = src[offsetY * SIZE_M + offsetX + 0];
 	smemIn[threadIdx.y * 4 + threadIdx.x + 1] = src[offsetY * SIZE_M + offsetX + 1];
@@ -130,8 +130,8 @@ void cudaSharedMatrix(int *init, int *dest) {
 	cudaMalloc(&deviceOutMatrix, (SIZE_N * SIZE_M * sizeof(int)));
 	cudaMemcpy(deviceInMatrix, init, SIZE_M * SIZE_N * sizeof(int), cudaMemcpyHostToDevice);
 
-	dim3 dimGrid(16, 1);
-	dim3 dimBlock(1, 512);
+	dim3 dimGrid(32, 1);
+	dim3 dimBlock(1, 1024);
 	cudaEventRecord(cuda_startTime, 0);
 	cudaSharedKernel << <dimGrid, dimBlock >> > (deviceInMatrix, deviceOutMatrix);
 
@@ -173,8 +173,8 @@ void cudaMatrix(int *init, int *dest) {
 	cudaMalloc(&deviceOutMatrix, (SIZE_N * SIZE_M * sizeof(int)));
 	cudaMemcpy(deviceInMatrix, init, SIZE_M * SIZE_N * sizeof(int), cudaMemcpyHostToDevice);
 
-	dim3 dimGrid(16, 1);
-	dim3 dimBlock(1, 512);
+	dim3 dimGrid(32, 1);
+	dim3 dimBlock(1, 1024);
 
 	cudaEventRecord(cuda_startTime, 0);
 
@@ -201,7 +201,6 @@ void cudaMatrix(int *init, int *dest) {
 }
 
 int main() {
-	//выделение памяти под матрицы в cpu
 	int* initMatrix = (int*)malloc(SIZE_M * SIZE_N * sizeof(int));
 	int* cpu_outMatrix = (int*)malloc(SIZE_M * SIZE_N * sizeof(int));
 	int* cuda_outMatrix = (int*)malloc(SIZE_M * SIZE_N * sizeof(int));
@@ -221,7 +220,7 @@ int main() {
 	showMatrix(cuda_outMatrixSharedMemory, SIZE_M, SIZE_N);
 
 	//showMatrix(cpu_outMatrix, SIZE_M/2 , SIZE_N * 2);
-	if (compareMatricies(cuda_outMatrixSharedMemory, cuda_outMatrix, SIZE_M, SIZE_N) && compareMatricies(cuda_outMatrix, cpu_outMatrix, SIZE_M, SIZE_N)) {
+	if (compareMatricies(cuda_outMatrix, cpu_outMatrix, SIZE_M, SIZE_N) && compareMatricies(cuda_outMatrix, cpu_outMatrix, SIZE_M, SIZE_N)) {
 		cout << "Results are equals!" << endl;
 	}
 	else {
