@@ -1,14 +1,19 @@
-﻿#include <iostream>
+﻿
+#include <iostream>
+#include <iomanip>
+#include <algorithm>
+#include <chrono>
+#include <iostream>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctime>
 #include <Windows.h>
-#include <cuda_runtime.h> 
 #include <intrin.h>
-#include <cuda.h>
-#include <cuda_runtime_api.h>
+
+ 
+#include <curand.h>
+#include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <device_functions.h>
 
 #pragma comment(lib, "cudart") 
 
@@ -17,10 +22,10 @@
 
 using namespace std;
 
-void fillMatrix(int*, int, int);
-bool compareMatricies(int*, int*, int, int);
+void fillMatrix(unsigned int*, int, int);
+bool compareMatricies(unsigned int*, unsigned int*, int, int);
 
-void showMatrix(int* mat, int sizeOfM, int sizeOfN) {
+void showMatrix(unsigned int* mat, int sizeOfM, int sizeOfN) {
 	for (int i = 0; i < sizeOfN / 64; i++) {
 		for (int j = 0; j < sizeOfM / 16; j++) {
 			cout << mat[(sizeOfM / 2) * i + j] << " ";
@@ -29,7 +34,7 @@ void showMatrix(int* mat, int sizeOfM, int sizeOfN) {
 	}
 }
 
-void cpuMatrix(int* inMatrix, int* outMatrix, int sizeOfM, int sizeOfN) {
+void cpuMatrix(unsigned int* inMatrix, unsigned int* outMatrix, int sizeOfM, int sizeOfN) {
 	int orfer[] = { 1, 2 , 0 ,3 };
 	LARGE_INTEGER frequency, start, finish;
 	float delay;
@@ -58,7 +63,7 @@ void cpuMatrix(int* inMatrix, int* outMatrix, int sizeOfM, int sizeOfN) {
 }
 
 
-__global__ void cudaSharedKernel(int* src, int* dst)
+__global__ void cudaSharedKernel(unsigned int* src, unsigned int* dst)
 {
 
 	const int offsetX = 4 * blockIdx.x + threadIdx.x;
@@ -95,7 +100,7 @@ __global__ void cudaSharedKernel(int* src, int* dst)
 	dst[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 0] = smemOut[threadIdx.y * 4 + threadIdx.x + 0];
 }
 
-__global__ void cudaKernel(int *init, int* dest) {
+__global__ void cudaKernel(unsigned int *init, unsigned int* dest) {
 	int offsetX = 4 * blockIdx.x + threadIdx.x;
 	int offsetY = threadIdx.y;
 
@@ -113,11 +118,11 @@ __global__ void cudaKernel(int *init, int* dest) {
 	dest[offsetOutY * SIZE_M / 2 + SIZE_M / 2 + offsetOutX + 0] = a;
 }
 
-void cudaSharedMatrix(int *init, int *dest) {
+void cudaSharedMatrix(unsigned int *init, unsigned int *dest) {
 	float resultTime;
 
-	int* deviceInMatrix;
-	int* deviceOutMatrix;
+	unsigned int* deviceInMatrix;
+	unsigned int* deviceOutMatrix;
 	//события для замера времени в CUDA
 
 	cudaEvent_t cuda_startTime;
@@ -156,11 +161,11 @@ void cudaSharedMatrix(int *init, int *dest) {
 }
 
 
-void cudaMatrix(int *init, int *dest) {
+void cudaMatrix(unsigned int *init, unsigned int *dest) {
 	float resultTime;
 
-	int* deviceInMatrix;
-	int* deviceOutMatrix;
+	unsigned int* deviceInMatrix;
+	unsigned int* deviceOutMatrix;
 	//события для замера времени в CUDA
 
 	cudaEvent_t cuda_startTime;
@@ -178,7 +183,7 @@ void cudaMatrix(int *init, int *dest) {
 
 	cudaEventRecord(cuda_startTime, 0);
 
-	cudaKernel << <dimGrid, dimBlock >> > (deviceInMatrix, deviceOutMatrix);
+	cudaKernel <<<dimGrid, dimBlock >>> (deviceInMatrix, deviceOutMatrix);
 
 	cudaPeekAtLastError();
 	cudaDeviceSynchronize();
@@ -201,11 +206,12 @@ void cudaMatrix(int *init, int *dest) {
 }
 
 int main() {
-	int* initMatrix = (int*)malloc(SIZE_M * SIZE_N * sizeof(int));
-	int* cpu_outMatrix = (int*)malloc(SIZE_M * SIZE_N * sizeof(int));
-	int* cuda_outMatrix = (int*)malloc(SIZE_M * SIZE_N * sizeof(int));
-	int* cuda_outMatrixSharedMemory = (int*)malloc(SIZE_M * SIZE_N * sizeof(int));
-
+	//unsigned int* initMatrix = (unsigned int*)malloc(SIZE_M * SIZE_N * sizeof(int));
+	unsigned int* initMatrix = (unsigned int*)malloc(SIZE_M * SIZE_N * sizeof(int));
+	unsigned int* cpu_outMatrix = (unsigned int*)malloc(SIZE_M * SIZE_N * sizeof(int));
+	unsigned int* cuda_outMatrix = (unsigned int*)malloc(SIZE_M * SIZE_N * sizeof(int));
+	unsigned int* cuda_outMatrixSharedMemory = (unsigned int*)malloc(SIZE_M * SIZE_N * sizeof(int));
+	
 	fillMatrix(initMatrix, SIZE_M, SIZE_N);
 
 	cpuMatrix(initMatrix, cpu_outMatrix, SIZE_M, SIZE_N);
@@ -249,19 +255,40 @@ void cpu_matrixOperation(short* inMatrix, short* outMatrix, int sizeOfM, int siz
 }
 
 
-void fillMatrix(int* matrix, int sizeM, int sizeN)
-{
-	int counter = 0;
+void fillMatrix(unsigned int* matrix, int sizeM, int sizeN)
+{	
+	curandGenerator_t generator;
+
+	/*curandCreateGenerator(&generator, CURAND_RNG_PSEUDO_DEFAULT);
+	curandSetPseudoRandomGeneratorSeed(generator, time(NULL));
+	curandGenerate(generator, matrix, sizeM * sizeN);
+	curandDestroyGenerator(generator);*/
+	
+	unsigned int* devData;
+
+	cudaMalloc(&devData, sizeM * sizeN);
+
+	curandCreateGenerator(&generator, CURAND_RNG_PSEUDO_DEFAULT);
+	curandSetPseudoRandomGeneratorSeed(generator, time(NULL));
+
+	curandGenerate(generator, (unsigned int*)devData, sizeM * sizeN / sizeof(unsigned int));
+
+	cudaMemcpy(matrix, devData, sizeM * sizeN, cudaMemcpyDeviceToHost);
+	curandDestroyGenerator(generator);
+
+	cudaFree(devData);
+	/*int counter = 0;
+
 	for (int i = 0; i < sizeN; ++i)
 	{
 		for (int j = 0; j < sizeM; ++j)
 		{
 			matrix[sizeM * i + j] = counter++;
 		}
-	}
+	}*/
 }
 
-bool compareMatricies(int* inMatrix, int* outMatrix, int sizeOfM, int sizeOfN) {
+bool compareMatricies(unsigned int* inMatrix, unsigned int* outMatrix, int sizeOfM, int sizeOfN) {
 	for (int i = 0; i < sizeOfN * sizeOfM; i++) {
 		if (inMatrix[i] != outMatrix[i]) {
 			return false;
